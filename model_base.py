@@ -15,7 +15,6 @@ from landlab import ModelGrid, create_grid, load_params
 from landlab.io.native_landlab import load_grid, save_grid
 
 
-
 def merge_user_and_default_params(user_params, default_params):
     """Merge default parameters into the user-parameter dictionary, adding
     defaults where user values are absent.
@@ -50,6 +49,38 @@ def get_or_create_node_field(grid, name, dtype="float64"):
         return grid.add_zeros(name, at="node", dtype=dtype, clobber=True)
 
 
+def _get_pause_time_list_and_next(time_info, clock_dict):
+    """
+    Given a float or iterable as ``time_info``, return a list of times to pause the
+    simulation to perform an action.
+
+    Return a list of times at which to pause the simulation, including an item at
+    the end that is after the termination of the run so that there is always an item
+    to be popped.
+
+    Parameters
+    ----------
+    time_info : float or list of float
+        Interval for pausing (if float) or list of individual times
+    clock_dict : dict
+        Contains ``start`` and ``stop`` as float items, with ``stop`` > ``start``
+
+    Returns
+    -------
+    list : list of simulation times at which to pause for a given action
+    float : the next time at which to pause
+    """
+    if isinstance(time_info, float):
+        pause_times = list(
+            range(clock_dict["start"], clock_dict["stop"] + 2 * time_info, time_info)
+        )
+    elif isinstance(time_info, list):
+        pause_times = time_info.copy()
+        pause_times.append(clock_dict["stop"] + 1.0)
+    next_pause = pause_times.pop(0)
+    return pause_times, next_pause
+
+
 class LandlabModel:
     """Base class for a generic Landlab grid-based model."""
 
@@ -58,28 +89,26 @@ class LandlabModel:
             "source": "create",
             "create_grid": {
                 "RasterModelGrid": [
-                    {"shape": (5, 5)}, {"spacing": 1.0},
+                    {"shape": (5, 5)},
+                    {"spacing": 1.0},
                 ],
             },
         },
         "clock": {"start": 0.0, "stop": 2.0, "step": 1.0},
         "output": {
-            "interval": 10,
+            "plot_times": 10.0,  # float or list
+            "save_times": 10.0,  # float or list
+            "report_times": 1.0,  # float or list
             "filepath": "model_output",
             "clobber": True,
             "fields": None,
         },
     }
 
-    def __init__(
-        self, params
-    ):
+    def __init__(self, params):
         """Initialize the model."""
-
         self.setup_grid(params["grid"])
-        self.setup_fields()
-        self.setup_for_output(params["output"])
-        self.instantiate_components(params)
+        self.setup_for_output(params)
         self.setup_run_control(params)
 
     def setup_grid(self, grid_params):
@@ -121,15 +150,42 @@ class LandlabModel:
                 raise ValueError
 
     def setup_for_output(self, params):
-        """Setup variables for control of plotting and saving."""
-        self.plot_interval = params["plot_interval"]
-        self.next_plot = self.plot_interval
-        self.save_interval = params["save_interval"]
-        self.next_save = self.save_interval
-        self.ndigits = params["ndigits"]
-        self.frame_num = 0  # current output image frame number
+        """
+        Setup variables for control of plotting and saving.
+
+        Parameters
+        ----------
+        params : dict
+            Parameter dictionary. Must include a key ``output`` with a dictionary
+        containing values for ``plot_times``, ``save_times``, and ``report_times``.
+        Each of these should be either a ``float`` or a ``list``. If a list, the value
+        is interpreted as a list of model times for plotting, saving, or reporting.
+        If a single float, the value is interpreted as the (regular) time interval
+        (in model time) for plotting, saving, or reporting.
+            Should also contain a key ``clock`` as a dictionary that has values for
+        ``start`` and ``stop``.
+        """
+        op_params = params["output"]
+        clock_params = params["clock"]
+
+        self.plot_times, self.next_plot = _get_pause_time_list_and_next(
+            op_params["plot_times"], clock_params
+        )
+        self.save_times, self.next_save = _get_pause_time_list_and_next(
+            op_params["save_times"], clock_params
+        )
+        self.report_times, self.next_report = _get_pause_time_list_and_next(
+            op_params["report_times"], clock_params
+        )
+
+        self.ndigits_for_save_files = int(np.ceil(np.log10(len(self.save_times) + 1)))
         self.save_num = 0  # current save file frame number
         self.save_name = params["save_name"]
+        if op_params["plot_to_file"]:
+            self.ndigits_for_plot_files = int(
+                np.ceil(np.log10(len(self.plot_times) + 1))
+            )
+            self.plot_num = 0  # current plot image frame number
         self.display_params = params
 
     def setup_run_control(self, params):

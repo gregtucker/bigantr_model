@@ -7,12 +7,10 @@
 #
 
 import sys
-import time
 
 import numpy as np
 from landlab import ModelGrid, create_grid, load_params
-
-from landlab.io.native_landlab import load_grid, save_grid
+from landlab.io.native_landlab import load_grid
 
 
 def merge_user_and_default_params(user_params, default_params):
@@ -72,7 +70,9 @@ def _get_pause_time_list_and_next(time_info, clock_dict):
     """
     if isinstance(time_info, float):
         pause_times = list(
-            range(clock_dict["start"], clock_dict["stop"] + 2 * time_info, time_info)
+            np.arange(
+                clock_dict["start"], clock_dict["stop"] + 2 * time_info, time_info
+            )
         )
     elif isinstance(time_info, list):
         pause_times = time_info.copy()
@@ -99,17 +99,19 @@ class LandlabModel:
             "plot_times": 10.0,  # float or list
             "save_times": 10.0,  # float or list
             "report_times": 1.0,  # float or list
-            "filepath": "model_output",
+            "save_path": "model_output",
             "clobber": True,
             "fields": None,
+            "plot_to_file": True,
         },
     }
 
-    def __init__(self, params):
+    def __init__(self, params={}):
         """Initialize the model."""
+        merge_user_and_default_params(params, self.DEFAULT_PARAMS)
         self.setup_grid(params["grid"])
         self.setup_for_output(params)
-        self.setup_run_control(params)
+        self.setup_run_control(params["clock"])
 
     def setup_grid(self, grid_params):
         """Load or create the grid.
@@ -117,7 +119,12 @@ class LandlabModel:
         Examples
         --------
         >>> p = {"grid": {"source": "create"}}
-        >>> p["grid"]["create_grid"] = {"RasterModelGrid": {"shape": (4, 5), "xy_spacing": 2.0}}
+        >>> p["grid"]["create_grid"] = {
+        ...     "RasterModelGrid": {
+        ...         "shape": (4, 5),
+        ...         "xy_spacing": 2.0
+        ...     }
+        ... }
         >>> sim = LandlabModel(params=p)
         >>> sim.grid.shape
         (4, 5)
@@ -160,10 +167,10 @@ class LandlabModel:
         containing values for ``plot_times``, ``save_times``, and ``report_times``.
         Each of these should be either a ``float`` or a ``list``. If a list, the value
         is interpreted as a list of model times for plotting, saving, or reporting.
-        If a single float, the value is interpreted as the (regular) time interval
-        (in model time) for plotting, saving, or reporting.
-            Should also contain a key ``clock`` as a dictionary that has values for
-        ``start`` and ``stop``.
+        If a single float, the value is interpreted as the (regular) time
+        interval (in model time) for plotting, saving, or reporting.
+            Should also contain a key ``clock`` as a dictionary that has values
+        for ``start`` and ``stop``.
         """
         op_params = params["output"]
         clock_params = params["clock"]
@@ -180,7 +187,7 @@ class LandlabModel:
 
         self.ndigits_for_save_files = int(np.ceil(np.log10(len(self.save_times) + 1)))
         self.save_num = 0  # current save file frame number
-        self.save_name = params["save_name"]
+        self.save_path = op_params["save_path"]
         if op_params["plot_to_file"]:
             self.ndigits_for_plot_files = int(
                 np.ceil(np.log10(len(self.plot_times) + 1))
@@ -188,11 +195,11 @@ class LandlabModel:
             self.plot_num = 0  # current plot image frame number
         self.display_params = params
 
-    def setup_run_control(self, params):
+    def setup_run_control(self, clock_params):
         """Initialize variables related to control of run timing."""
-        self.run_duration = params["run_duration"]
-        self.dt = params["dt"]
-        self.current_time = params["start_time"]
+        self.run_duration = clock_params["stop"] - clock_params["start"]
+        self.dt = clock_params["step"]
+        self.current_time = clock_params["start"]
 
     def update(self, dt):
         """Advance the model by one time step of duration dt."""
@@ -207,7 +214,8 @@ class LandlabModel:
             remaining_time -= dt
 
     def run(self, run_duration=None, dt=None):
-        """Run the model for given duration, or self.run_duration if none given.
+        """Run the model for given duration, or self.run_duration if none
+        given.
 
         Includes file output of images and model state at user-specified
         intervals.
@@ -242,12 +250,7 @@ if __name__ == "__main__":
     """
     if len(sys.argv) > 1:
         params = load_params(sys.argv[1])
-        sim = IslandSimulator(
-            params["grid_setup"],
-            params["process"],
-            params["run_control"],
-            params["output"],
-        )
+        sim = LandlabModel(params)
     else:
-        sim = IslandSimulator()  # use default params
+        sim = LandlabModel()  # use default params
     sim.run()

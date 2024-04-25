@@ -10,7 +10,7 @@ import sys
 
 import numpy as np
 from landlab import ModelGrid, create_grid, load_params
-from landlab.io.native_landlab import load_grid
+from landlab.io.native_landlab import load_grid, save_grid
 
 
 def merge_user_and_default_params(user_params, default_params):
@@ -201,6 +201,22 @@ class LandlabModel:
         self.dt = clock_params["step"]
         self.current_time = clock_params["start"]
 
+    def report(self, current_time):
+        """Issue a text update on status."""
+        print(self.__class__.__name__, "time =", current_time)
+
+    def plot(self, current_time=0.0):
+        """Virtual function for plotting; to be overridden."""
+        print("Base class placeholder for plot() at time", current_time)
+
+    def save_state(self, save_path, save_num, ndigits):
+        """
+        Save the grid and its fields.
+
+        Override this function to add to or modify what gets saved.
+        """
+        save_grid(self.grid, save_path + str(save_num).zfill(ndigits) + ".grid")
+
     def update(self, dt):
         """Advance the model by one time step of duration dt."""
         self.current_time += dt
@@ -231,13 +247,17 @@ class LandlabModel:
             next_pause = min(next_pause, self.next_report)
             self.update_until(next_pause, dt)
             if self.current_time >= self.next_report:
-                self.report()
+                self.report(self.current_time)
+                self.next_report = self.report_times.pop(0)
             if self.current_time >= self.next_plot:
                 self.plot()
-                self.next_plot += self.plot_interval
+                self.next_plot = self.plot_times.pop(0)
             if self.current_time >= self.next_save:
                 self.save_num += 1
-                self.save_state(self.save_num)
+                self.save_state(
+                    self.save_path, self.save_num, self.ndigits_for_save_files
+                )
+                self.next_save = self.save_times.pop(0)
 
 
 if __name__ == "__main__":

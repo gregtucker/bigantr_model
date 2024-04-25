@@ -10,9 +10,10 @@
 import sys
 
 import numpy as np
+from landlab.core import load_params
 from landlab.components import GravelBedrockEroder, PriorityFloodFlowRouter
 
-from .model_base import LandlabModel
+from model_base import LandlabModel
 
 
 class BigantrLEM(LandlabModel):
@@ -23,7 +24,7 @@ class BigantrLEM(LandlabModel):
             "source": "create",
             "create_grid": {
                 "RasterModelGrid": [
-                    {"shape": (31, 31)},
+                    (31, 31),
                     {"xy_spacing": 1000.0},
                 ],
             },
@@ -45,8 +46,23 @@ class BigantrLEM(LandlabModel):
         "baselevel": {
             "uplift_rate": 0.0001,
         },
+        "flow_routing": {
+            "flow_metric": "D8",
+            "update_flow_depressions": True,
+            "depression_handler": "fill",
+            "epsilon": True,
+        },
         "fluvial": {
-            "frog": 1,
+            "intermittency_factor": 0.01,
+            "transport_coefficient": 0.041,
+            "sediment_porosity": 1.0 / 3.0,
+            "depth_decay_scale": 1.0,
+            "plucking_coefficient": 1.0e-4,
+            "number_of_sediment_classes": 1,
+            "init_thickness_per_class": [1.0],
+            "abrasion_coefficients": [1.0e-4],
+            "coarse_fractions_from_plucking": [0.5],
+            "rock_abrasion_index": 0,
         },
     }
 
@@ -73,29 +89,31 @@ class BigantrLEM(LandlabModel):
         self.uplift_rate = params["baselevel"]["uplift_rate"]
 
         # Instantiate and initialize components: flow router
+        flow_params = params["flow_routing"]
         self.router = PriorityFloodFlowRouter(
             self.grid,
             surface="topographic__elevation",
-            flow_metric="D8",
-            update_flow_depressions=True,
-            depression_handler="fill",
-            epsilon=True,
+            flow_metric=flow_params["flow_metric"],
+            update_flow_depressions=flow_params["update_flow_depressions"],
+            depression_handler=flow_params["depression_handler"],
+            epsilon=flow_params["epsilon"],
             accumulate_flow=True,
         )
 
         # Instantiate and initialize components: fluvial transport, erosion, deposition
+        gbe_params = params["fluvial"]
         self.eroder = GravelBedrockEroder(
             self.grid,
-            intermittency_facto=0.01,
-            transport_coefficient=0.041,
-            sediment_porosity=1.0 / 3.0,
-            depth_decay_scale=1.0,
-            plucking_coefficient=1.0e-4,
-            number_of_sediment_classes=1,
-            init_thickness_per_class=[1.0],
-            abrasion_coefficients=[1.0e-4],
-            coarse_fractions_from_plucking=[0.5],
-            rock_abrasion_index=0,
+            intermittency_factor=gbe_params["intermittency_factor"],
+            transport_coefficient=gbe_params["transport_coefficient"],
+            sediment_porosity=gbe_params["sediment_porosity"],
+            depth_decay_scale=gbe_params["depth_decay_scale"],
+            plucking_coefficient=gbe_params["plucking_coefficient"],
+            number_of_sediment_classes=gbe_params["number_of_sediment_classes"],
+            init_thickness_per_class=gbe_params["init_thickness_per_class"],
+            abrasion_coefficients=gbe_params["abrasion_coefficients"],
+            coarse_fractions_from_plucking=gbe_params["coarse_fractions_from_plucking"],
+            rock_abrasion_index=gbe_params["rock_abrasion_index"],
         )
 
     def update(self, dt):
@@ -104,3 +122,12 @@ class BigantrLEM(LandlabModel):
         self.router.run_one_step()
         self.eroder.run_one_step(dt)
         self.current_time += dt
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        params = load_params(sys.argv[1])
+    else:
+        params = {}
+    bigantr = BigantrLEM(params)
+    bigantr.run()
